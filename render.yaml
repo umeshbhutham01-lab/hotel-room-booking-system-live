@@ -2,6 +2,7 @@ services:
   - type: web
     name: hotel-booking-api
     runtime: node
+    plan: free
     rootDir: hotel-room-booking-mern/server
     buildCommand: npm install
     startCommand: npm start
