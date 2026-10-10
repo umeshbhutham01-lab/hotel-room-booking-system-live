@@ -69,7 +69,10 @@ app.use((err, _req, res, _next) => {
 
 const PORT = process.env.PORT || 5000;
 async function startServer() {
-  await mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/hotel_booking");
+  if (!process.env.MONGO_URI) {
+    throw new Error("MONGO_URI is required. Set it in the Render environment or server/.env.");
+  }
+  await mongoose.connect(process.env.MONGO_URI);
   if (await Room.countDocuments() === 0) {
     await Room.insertMany(demoRooms);
     console.log(`Seeded ${demoRooms.length} demo rooms.`);

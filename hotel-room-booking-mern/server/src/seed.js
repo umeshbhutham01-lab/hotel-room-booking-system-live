@@ -8,7 +8,10 @@ import demoRooms from "./demoRooms.js";
 dotenv.config();
 
 try {
-  await mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/hotel_booking");
+  if (!process.env.MONGO_URI) {
+    throw new Error("MONGO_URI is required. Set it in server/.env before running the seed script.");
+  }
+  await mongoose.connect(process.env.MONGO_URI);
   if (await Room.countDocuments() === 0) await Room.insertMany(demoRooms);
   const adminEmail = (process.env.ADMIN_EMAIL || "admin@haven.local").toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD || "";
