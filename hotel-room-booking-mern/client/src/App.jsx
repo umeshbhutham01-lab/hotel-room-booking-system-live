@@ -14,6 +14,13 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character
 const today = new Date().toISOString().slice(0, 10);
 const loadUser = () => { try { return JSON.parse(localStorage.getItem("haven_user") || "null"); } catch { return null; } };
 const loadToken = () => localStorage.getItem("haven_token") || "";
+const loadDemoProfile = () => {
+  try {
+    return JSON.parse(localStorage.getItem("haven_demo_profile") || "null");
+  } catch {
+    return null;
+  }
+};
 const loadDemoBookings = () => {
   try {
     const bookings = JSON.parse(localStorage.getItem("haven_demo_bookings") || "[]");
@@ -57,6 +64,9 @@ export default function App() {
   const [form, setForm] = useState({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
   const [submitting, setSubmitting] = useState(false);
   const [user, setUser] = useState(loadUser);
+  const [demoProfile, setDemoProfile] = useState(loadDemoProfile);
+  const [demoSignInOpen, setDemoSignInOpen] = useState(false);
+  const [demoSignInForm, setDemoSignInForm] = useState({ name: "", email: "" });
   const [panel, setPanel] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const profileMenuRef = useRef(null);
@@ -66,8 +76,8 @@ export default function App() {
   const [adminSummary, setAdminSummary] = useState(null);
   const [adminBookings, setAdminBookings] = useState([]);
   const [adminRoomForm, setAdminRoomForm] = useState({ name: "", type: "Standard", description: "", pricePerNight: "2499", capacity: "2", image: "", amenities: "Wi-Fi, Air conditioning" });
-  const profileName = user?.name || demoBookings[0]?.guestName || user?.email || "Guest";
-  const profileEmail = user?.email || demoBookings[0]?.email || "";
+  const profileName = user?.name || demoProfile?.name || demoBookings[0]?.guestName || user?.email || "Guest";
+  const profileEmail = user?.email || demoProfile?.email || demoBookings[0]?.email || "";
 
   async function refreshRooms() {
     const controller = new AbortController();
@@ -114,9 +124,23 @@ export default function App() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
   function signOut() {
+    if (demoProfile) {
+      localStorage.removeItem("haven_demo_profile");
+      setDemoProfile(null);
+      setNotice("You have signed out of demo mode.");
+      return;
+    }
     localStorage.removeItem("haven_token"); localStorage.removeItem("haven_user");
     setUser(null); setPanel(""); setMyBookings([]); setAdminSummary(null); setAdminBookings([]);
     setNotice("You have signed out.");
+  }
+  function signInDemo(event) {
+    event.preventDefault();
+    const profile = { name: demoSignInForm.name.trim(), email: demoSignInForm.email.trim() };
+    localStorage.setItem("haven_demo_profile", JSON.stringify(profile));
+    setDemoProfile(profile);
+    setDemoSignInOpen(false);
+    setNotice("Demo sign-in successful. No account was created.");
   }
   function printReceipt(booking) {
     const receiptWindow = window.open("", "_blank");
@@ -259,7 +283,7 @@ export default function App() {
     setDemoReceipt(null);
     setBookingError("");
     setPaymentMode("");
-    setForm((prev) => ({ ...prev, guestName: user?.name || "", email: user?.email || "", guests: 1 }));
+    setForm((prev) => ({ ...prev, guestName: user?.name || demoProfile?.name || "", email: user?.email || demoProfile?.email || "", guests: 1 }));
   }
 
   async function fetchMyBookings() {
@@ -334,10 +358,11 @@ export default function App() {
           {profileOpen && <div className="profile-dropdown" role="menu">
             <div className="profile-summary">
               <span className="profile-avatar large" aria-hidden="true">{profileName.trim().charAt(0).toUpperCase()}</span>
-              <div><strong>{profileName}</strong>{profileEmail && <span>{profileEmail}</span>}<small>{user?.role === "admin" ? "Administrator" : user ? "Guest account" : "Demo guest"}</small></div>
+              <div><strong>{profileName}</strong>{profileEmail && <span>{profileEmail}</span>}<small>{user?.role === "admin" ? "Administrator" : user ? "Guest account" : demoProfile ? "Demo account" : "Demo guest"}</small></div>
             </div>
             <button role="menuitem" onClick={fetchMyBookings}>My bookings</button>
-            {user && <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>}
+            {!user && !demoProfile && <button role="menuitem" onClick={() => { setProfileOpen(false); setDemoSignInForm({ name: "", email: "" }); setDemoSignInOpen(true); }}>Demo sign in</button>}
+            {(user || demoProfile) && <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>}
           </div>}
         </div>
       </div>
@@ -433,7 +458,7 @@ export default function App() {
         <div className="eyebrow dark"><span></span> HERE TO HELP</div>
         <div className="help-heading"><h2>Good to <em>know.</em></h2><p>Quick answers for a smooth stay. For personal assistance, give us a call.</p></div>
         <div className="help-faqs">
-          <details><summary>How do I book a room?</summary><p>Choose a room, select your check-in and check-out dates, enter your guest details, then sign in and complete payment. Your paid booking will appear under My bookings.</p></details>
+          <details><summary>How do I book a room?</summary><p>Choose a room, select your check-in and check-out dates, enter your guest details, then complete payment. An account is not required. Demo bookings appear under My bookings in this browser.</p></details>
           <details><summary>What if the room is already booked for my dates?</summary><p>That room cannot be booked for overlapping dates. Choose different dates or another room.</p></details>
           <details><summary>How do I cancel a booking?</summary><p>Open My bookings and choose Cancel booking for an unpaid booking. Paid bookings are not automatically refunded; contact the hotel for help with a refund.</p></details>
           <details><summary>Where can I find my receipt?</summary><p>Open My bookings after payment and select View receipt on the paid booking. You can print or save it from there.</p></details>
@@ -468,7 +493,20 @@ export default function App() {
             <button className="submit-btn" disabled={submitting}>{submitting ? "Opening secure checkout…" : selected.previewOnly ? "Confirm demo booking" : "Continue to Razorpay"} <span>↗</span></button>
           </div>
           {bookingError && <p className="booking-error" role="alert">{bookingError}</p>}
-          <small className="form-note">{selected.previewOnly ? "Demo only · no payment is collected and this booking is not saved." : paymentMode === "test" ? "Razorpay test mode · no real money is charged." : paymentMode === "live" ? "Razorpay live mode · a real payment will be charged." : "Payment is processed securely by Razorpay."}</small>
+          <small className="form-note">{selected.previewOnly ? "Demo only · no payment is collected; booking is saved in this browser only." : paymentMode === "test" ? "Razorpay test mode · no real money is charged." : paymentMode === "live" ? "Razorpay live mode · a real payment will be charged." : "Payment is processed securely by Razorpay."}</small>
+        </form>
+      </section>
+    </div>}
+    {demoSignInOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDemoSignInOpen(false); }}>
+      <section className="booking-modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="demo-signin-title">
+        <button className="modal-close" onClick={() => setDemoSignInOpen(false)} aria-label="Close">×</button>
+        <div className="eyebrow dark"><span></span> TRY THE GUEST EXPERIENCE</div>
+        <h2 id="demo-signin-title">Demo <em>sign in.</em></h2>
+        <p className="form-note">This creates a browser-only demo profile. No account is created and no password is needed.</p>
+        <form onSubmit={signInDemo}>
+          <label>Full name<input required autoComplete="name" value={demoSignInForm.name} onChange={(event) => setDemoSignInForm((form) => ({ ...form, name: event.target.value }))} placeholder="Your name" /></label>
+          <label>Email address<input required type="email" autoComplete="email" value={demoSignInForm.email} onChange={(event) => setDemoSignInForm((form) => ({ ...form, email: event.target.value }))} placeholder="you@example.com" /></label>
+          <button className="submit-btn">Continue in demo mode <span>↗</span></button>
         </form>
       </section>
     </div>}
