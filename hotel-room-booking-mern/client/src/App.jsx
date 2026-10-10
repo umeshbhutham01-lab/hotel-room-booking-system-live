@@ -361,7 +361,7 @@ export default function App() {
               <div><strong>{profileName}</strong>{profileEmail && <span>{profileEmail}</span>}<small>{user?.role === "admin" ? "Administrator" : user ? "Guest account" : demoProfile ? "Demo account" : "Demo guest"}</small></div>
             </div>
             <button role="menuitem" onClick={fetchMyBookings}>My bookings</button>
-            {!user && !demoProfile && <button role="menuitem" onClick={() => { setProfileOpen(false); setDemoSignInForm({ name: "", email: "" }); setDemoSignInOpen(true); }}>Demo sign in</button>}
+            {!user && !demoProfile && <button role="menuitem" onClick={() => { setProfileOpen(false); setDemoSignInForm({ name: "", email: "" }); setDemoSignInOpen(true); }}>Sign in</button>}
             {(user || demoProfile) && <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>}
           </div>}
         </div>
