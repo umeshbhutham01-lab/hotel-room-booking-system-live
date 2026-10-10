@@ -8,6 +8,7 @@ const demoRooms = [
   { _id: "demo-garden-deluxe", name: "Garden Deluxe", type: "Deluxe", description: "A calm retreat with warm design and modern amenities.", pricePerNight: 3899, capacity: 3, image: "https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=1200&q=80", amenities: ["Wi-Fi", "Air conditioning", "Work desk"], previewOnly: true }
 ];
 const money = (amount) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amount || 0);
+const displayBookingReference = (reference) => String(reference).replace(/^DEMO-/, "LOCAL-");
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 }[character]));
@@ -127,7 +128,7 @@ export default function App() {
     if (demoProfile) {
       localStorage.removeItem("haven_demo_profile");
       setDemoProfile(null);
-      setNotice("You have signed out of demo mode.");
+      setNotice("You have signed out.");
       return;
     }
     localStorage.removeItem("haven_token"); localStorage.removeItem("haven_user");
@@ -150,21 +151,21 @@ export default function App() {
     }
     const date = (value) => new Date(value).toLocaleDateString("en-IN", { dateStyle: "long" });
     const rows = [
-      ["Receipt number", booking._id],
+      ["Receipt number", displayBookingReference(booking._id)],
       ["Guest", booking.guestName],
       ["Email", booking.email],
       ["Room", booking.room?.name || "Room unavailable"],
       ["Guests", booking.guests],
       ["Check-in", date(booking.checkIn)],
       ["Check-out", date(booking.checkOut)],
-      ["Payment", booking.paymentStatus === "demo" ? "Demo booking — no payment collected" : booking.paymentStatus],
+      ["Payment", booking.paymentStatus === "demo" ? "Preview booking — no payment collected" : booking.paymentStatus],
       ...(booking.razorpayPaymentId ? [["Payment ID", booking.razorpayPaymentId]] : []),
       [booking.paymentStatus === "paid" ? "Total paid" : "Booking total", money(booking.totalPrice)]
     ].map(([label, value]) => `<div class="row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
 
     receiptWindow.document.write(`<!doctype html>
       <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-      <title>Booking receipt ${escapeHtml(booking._id)}</title>
+      <title>Booking receipt ${escapeHtml(displayBookingReference(booking._id))}</title>
       <style>
         body{margin:0;padding:40px;background:#f5f1e8;color:#1b352f;font:15px Arial,sans-serif}
         main{max-width:620px;margin:0 auto;padding:40px;background:#fffdf8;border:1px solid #e5ddcf}
@@ -186,7 +187,7 @@ export default function App() {
         throw new Error("Choose a check-out date after your check-in date.");
       }
       if (selected.previewOnly) {
-        const reference = `DEMO-${Date.now().toString(36).toUpperCase()}`;
+        const reference = `LOCAL-${Date.now().toString(36).toUpperCase()}`;
         const receipt = {
           _id: reference,
           guestName: form.guestName,
@@ -358,7 +359,7 @@ export default function App() {
           {profileOpen && <div className="profile-dropdown" role="menu">
             <div className="profile-summary">
               <span className="profile-avatar large" aria-hidden="true">{profileName.trim().charAt(0).toUpperCase()}</span>
-              <div><strong>{profileName}</strong>{profileEmail && <span>{profileEmail}</span>}<small>{user?.role === "admin" ? "Administrator" : user ? "Guest account" : "Demo account"}</small></div>
+              <div><strong>{profileName}</strong>{profileEmail && <span>{profileEmail}</span>}<small>{user?.role === "admin" ? "Administrator" : user ? "Guest account" : "Guest profile"}</small></div>
             </div>
             <button role="menuitem" onClick={fetchMyBookings}>My bookings</button>
             <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>
@@ -412,7 +413,7 @@ export default function App() {
         <div className="dashboard-title"><div><div className="eyebrow dark"><span></span> YOUR BOOKINGS</div><h2>My <em>bookings.</em></h2></div>{panel === "bookings" && <button className="filter" onClick={() => setPanel("")}>Close</button>}</div>
         {!myBookings.length && !demoBookings.length ? <p className="empty">You have no bookings yet.</p> : <div className="my-bookings-list">{[...myBookings, ...demoBookings].map(b => <article className="my-booking-card" key={b._id}>
           <div className="my-booking-heading">
-            <div><div className="eyebrow dark"><span></span> BOOKING DETAILS</div><h3>{b.room?.name || "Room unavailable"}</h3><small>Booking reference · {b._id}</small></div>
+            <div><div className="eyebrow dark"><span></span> BOOKING DETAILS</div><h3>{b.room?.name || "Room unavailable"}</h3><small>Booking reference · {displayBookingReference(b._id)}</small></div>
             <span className={`status ${b.status}`}>{b.status.replace("_", " ")}</span>
           </div>
           <div className="my-booking-details">
@@ -420,7 +421,7 @@ export default function App() {
             <div><small>Check-in</small><strong>{new Date(b.checkIn).toLocaleDateString("en-IN", { dateStyle: "medium" })}</strong></div>
             <div><small>Check-out</small><strong>{new Date(b.checkOut).toLocaleDateString("en-IN", { dateStyle: "medium" })}</strong></div>
             <div><small>Guests</small><strong>{b.guests}</strong></div>
-            <div><small>Payment status</small><strong>{b.paymentStatus}</strong>{b.razorpayPaymentId && <span>Payment ID · {b.razorpayPaymentId}</span>}</div>
+            <div><small>Payment status</small><strong>{b.paymentStatus === "demo" ? "Not charged" : b.paymentStatus}</strong>{b.razorpayPaymentId && <span>Payment ID · {b.razorpayPaymentId}</span>}</div>
           </div>
           <div className="my-booking-footer"><div><small>Total</small><strong>{money(b.totalPrice)}</strong></div><div className="my-booking-actions">
             {b.status === "confirmed" && b.paymentStatus === "paid" && <div className="booking-rating" aria-label={b.rating ? `Your rating: ${b.rating} out of 5 stars` : "Rate this room"}>
@@ -457,7 +458,7 @@ export default function App() {
         <div className="eyebrow dark"><span></span> HERE TO HELP</div>
         <div className="help-heading"><h2>Good to <em>know.</em></h2><p>Quick answers for a smooth stay. For personal assistance, give us a call.</p></div>
         <div className="help-faqs">
-          <details><summary>How do I book a room?</summary><p>Choose a room, select your check-in and check-out dates, enter your guest details, then complete payment. An account is not required. Demo bookings appear under My bookings in this browser.</p></details>
+          <details><summary>How do I book a room?</summary><p>Choose a room, select your check-in and check-out dates, enter your guest details, then complete payment. An account is not required. Preview bookings appear under My bookings in this browser.</p></details>
           <details><summary>What if the room is already booked for my dates?</summary><p>That room cannot be booked for overlapping dates. Choose different dates or another room.</p></details>
           <details><summary>How do I cancel a booking?</summary><p>Open My bookings and choose Cancel booking for an unpaid booking. Paid bookings are not automatically refunded; contact the hotel for help with a refund.</p></details>
           <details><summary>Where can I find my receipt?</summary><p>Open My bookings after payment and select View receipt on the paid booking. You can print or save it from there.</p></details>
@@ -489,10 +490,10 @@ export default function App() {
           {nights > 0 && <div className="total-row"><span>{nights} night{nights > 1 ? "s" : ""} × {money(selected.pricePerNight)}</span><strong>{money(nights * selected.pricePerNight)}</strong></div>}
           <div className="booking-form-actions">
             <button className="booking-back-btn" type="button" disabled={submitting} onClick={() => { setSelected(null); setBookingError(""); }}>← Back</button>
-            <button className="submit-btn" disabled={submitting}>{submitting ? "Opening secure checkout…" : selected.previewOnly ? "Confirm demo booking" : "Continue to Razorpay"} <span>↗</span></button>
+            <button className="submit-btn" disabled={submitting}>{submitting ? "Opening secure checkout…" : selected.previewOnly ? "Confirm booking" : "Continue to Razorpay"} <span>↗</span></button>
           </div>
           {bookingError && <p className="booking-error" role="alert">{bookingError}</p>}
-          <small className="form-note">{selected.previewOnly ? "Demo only · no payment is collected; booking is saved in this browser only." : paymentMode === "test" ? "Razorpay test mode · no real money is charged." : paymentMode === "live" ? "Razorpay live mode · a real payment will be charged." : "Payment is processed securely by Razorpay."}</small>
+          <small className="form-note">{selected.previewOnly ? "No payment is collected; this booking is saved in this browser only." : paymentMode === "test" ? "Razorpay test mode · no real money is charged." : paymentMode === "live" ? "Razorpay live mode · a real payment will be charged." : "Payment is processed securely by Razorpay."}</small>
         </form>
       </section>
     </div>}
@@ -500,12 +501,12 @@ export default function App() {
       <section className="booking-modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="demo-signin-title">
         <button className="modal-close" onClick={() => setDemoSignInOpen(false)} aria-label="Close">×</button>
         <div className="eyebrow dark"><span></span> TRY THE GUEST EXPERIENCE</div>
-        <h2 id="demo-signin-title">Demo <em>sign in.</em></h2>
-        <p className="form-note">This creates a browser-only demo profile. No account is created and no password is needed.</p>
+        <h2 id="demo-signin-title">Guest <em>sign in.</em></h2>
+        <p className="form-note">This creates a browser-only guest profile. No account is created and no password is needed.</p>
         <form onSubmit={signInDemo}>
           <label>Full name<input required autoComplete="name" value={demoSignInForm.name} onChange={(event) => setDemoSignInForm((form) => ({ ...form, name: event.target.value }))} placeholder="Your name" /></label>
           <label>Email address<input required type="email" autoComplete="email" value={demoSignInForm.email} onChange={(event) => setDemoSignInForm((form) => ({ ...form, email: event.target.value }))} placeholder="you@example.com" /></label>
-          <button className="submit-btn">Continue in demo mode <span>↗</span></button>
+          <button className="submit-btn">Continue <span>↗</span></button>
         </form>
       </section>
     </div>}
