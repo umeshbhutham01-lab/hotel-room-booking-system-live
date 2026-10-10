@@ -140,7 +140,7 @@ export default function App() {
     localStorage.setItem("haven_demo_profile", JSON.stringify(profile));
     setDemoProfile(profile);
     setDemoSignInOpen(false);
-    setNotice("Demo sign-in successful. No account was created.");
+    setNotice("sign in success full");
   }
   function printReceipt(booking) {
     const receiptWindow = window.open("", "_blank");
