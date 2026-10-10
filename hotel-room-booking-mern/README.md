@@ -14,12 +14,13 @@ The frontend is hosted on Vercel, the Express API on Render, and MongoDB on Mong
 
 `VITE_API_URL` is public frontend configuration; never put credentials in it. Keep MongoDB, JWT, and payment credentials only in Render's environment settings for production. For local development, copy `server/.env.example` to `server/.env` and set the real `MONGO_URI` there; `.env` is ignored by Git and must not be committed. The example URI is a template, not a working connection string.
 
-Room listings, guest bookings, and payment use the API. If the API is unavailable, the site displays non-bookable demo room previews until the database-backed listing is available again. Guests can book without creating an account; a secure booking access token is used to verify payment and release an unpaid reservation. Set Razorpay test keys in Render to enable test checkout; the booking form identifies test mode and no real payment is collected. Use live keys only when ready to accept real payments.
+Room listings, guest bookings, and payment use the API. If the API is unavailable, the site displays four demo rooms that support a local-only booking confirmation; these demo bookings are not stored and do not collect payment. Guests can book database-backed rooms without creating an account; a secure booking access token is used to verify payment and release an unpaid reservation. Set Razorpay test keys in Render to enable test checkout; the booking form identifies test mode and no real payment is collected. Use live keys only when ready to accept real payments.
 
 ## Features
 - Browse hotel rooms
 - Filter rooms by type
-- Book a room without creating an account
+- Book a database-backed room without creating an account
+- Try a local-only demo booking when the API is unavailable
 - Complete payment through Razorpay Checkout in test mode
 - Prevent overlapping bookings for the same room, including simultaneous booking attempts
 - Let guests rate paid, confirmed bookings and show room rating averages

@@ -41,7 +41,6 @@ export default function App() {
   const [rooms, setRooms] = useState([]);
   const [filter, setFilter] = useState("All");
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
   const [notice, setNotice] = useState("");
   const [bookingError, setBookingError] = useState("");
@@ -62,12 +61,10 @@ export default function App() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), 10000);
     setLoading(true);
-    setError("");
-    try { setRooms(await api("/rooms", { signal: controller.signal })); setError(""); }
+    try { setRooms(await api("/rooms", { signal: controller.signal })); }
     catch (e) {
       console.error("Failed to load live rooms:", e);
       setRooms(demoRooms);
-      setError("Live room data is unavailable. Showing demo previews; booking is unavailable until the booking service reconnects.");
     } finally {
       window.clearTimeout(timeoutId);
       setLoading(false);
@@ -151,6 +148,14 @@ export default function App() {
     try {
       if (!form.checkIn || !form.checkOut || new Date(form.checkOut) <= new Date(form.checkIn)) {
         throw new Error("Choose a check-out date after your check-in date.");
+      }
+      if (selected.previewOnly) {
+        const reference = `DEMO-${Date.now().toString(36).toUpperCase()}`;
+        setNotice(`Demo booking confirmed for ${selected.name}. Reference: ${reference}. No payment was charged and this booking was not saved to the hotel database.`);
+        setSelected(null);
+        setForm({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
+        setSubmitting(false);
+        return;
       }
       const ready = await loadRazorpay();
       if (!ready) throw new Error("Razorpay Checkout could not load. Check your internet connection.");
@@ -326,13 +331,12 @@ export default function App() {
           {["All", "Standard", "Deluxe", "Suite"].map((type) => <button key={type} className={filter === type ? "filter active" : "filter"} onClick={() => setFilter(type)}>{type}</button>)}
           <span className="room-count">{visibleRooms.length} SPACES TO DISCOVER</span>
         </div>
-        {error && <div className="message error" role="alert">{error}<button type="button" disabled={loading} onClick={refreshRooms}>Retry</button></div>}
         {notice && <div className="message success">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss">×</button></div>}
         {loading ? <div className="loading">Finding your room…</div> : <div className="room-grid">
           {visibleRooms.map((room, index) => <article className="room-card" key={room._id}>
             <div className="room-image-wrap"><img src={room.image || "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=1200&q=80"} alt={room.name} /><span className="room-type">{room.type}</span><span className="room-index">0{index + 1}</span></div>
             <div className="room-info"><div className="room-title-row"><h3>{room.name}</h3><span className="capacity">♧ {room.capacity}</span></div><p>{room.description}</p><div className="room-rating" aria-label={room.ratingCount ? `${room.ratingAverage} out of 5 stars, ${room.ratingCount} ratings` : "No ratings yet"}><span className={room.ratingCount ? "room-rating-stars has-rating" : "room-rating-stars"} aria-hidden="true">{[1, 2, 3, 4, 5].map((star) => <span key={star} className={room.ratingAverage >= star ? "filled" : ""}>★</span>)}</span>{room.ratingCount ? <span>{room.ratingAverage} · {room.ratingCount} {room.ratingCount === 1 ? "rating" : "ratings"}</span> : <span>No ratings yet</span>}</div><div className="amenities">{(room.amenities || []).slice(0, 3).map((a) => <span key={a}>{a}</span>)}</div>
-              <div className="room-bottom"><div><strong>{money(room.pricePerNight)}</strong><small> / night</small></div><button className="book-btn" disabled={room.previewOnly} title={room.previewOnly ? "Booking is unavailable while the booking service is offline." : undefined} onClick={() => startBooking(room)}>{room.previewOnly ? "Preview only" : <>Book this room <span>↗</span></>}</button></div>
+              <div className="room-bottom"><div><strong>{money(room.pricePerNight)}</strong><small> / night</small></div><button className="book-btn" onClick={() => startBooking(room)}>{room.previewOnly ? "Try demo booking" : <>Book this room <span>↗</span></>}</button></div>
             </div>
           </article>)}
           {!visibleRooms.length && <p className="empty">No rooms in this category yet. Try another filter.</p>}
@@ -420,10 +424,10 @@ export default function App() {
           {nights > 0 && <div className="total-row"><span>{nights} night{nights > 1 ? "s" : ""} × {money(selected.pricePerNight)}</span><strong>{money(nights * selected.pricePerNight)}</strong></div>}
           <div className="booking-form-actions">
             <button className="booking-back-btn" type="button" disabled={submitting} onClick={() => { setSelected(null); setBookingError(""); }}>← Back</button>
-            <button className="submit-btn" disabled={submitting}>{submitting ? "Opening secure checkout…" : "Continue to Razorpay"} <span>↗</span></button>
+            <button className="submit-btn" disabled={submitting}>{submitting ? "Opening secure checkout…" : selected.previewOnly ? "Confirm demo booking" : "Continue to Razorpay"} <span>↗</span></button>
           </div>
           {bookingError && <p className="booking-error" role="alert">{bookingError}</p>}
-          <small className="form-note">{paymentMode === "test" ? "Razorpay test mode · no real money is charged." : paymentMode === "live" ? "Razorpay live mode · a real payment will be charged." : "Payment is processed securely by Razorpay."}</small>
+          <small className="form-note">{selected.previewOnly ? "Demo only · no payment is collected and this booking is not saved." : paymentMode === "test" ? "Razorpay test mode · no real money is charged." : paymentMode === "live" ? "Razorpay live mode · a real payment will be charged." : "Payment is processed securely by Razorpay."}</small>
         </form>
       </section>
     </div>}
