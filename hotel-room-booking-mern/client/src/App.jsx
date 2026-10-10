@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const demoRooms = [
+  { _id: "demo-classic-comfort", name: "Classic Comfort", type: "Standard", description: "A welcoming room for relaxed city stays.", pricePerNight: 2499, capacity: 2, image: "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=1200&q=80", amenities: ["Wi-Fi", "Air conditioning", "Queen bed"], previewOnly: true },
+  { _id: "demo-oceanview-deluxe", name: "Oceanview Deluxe", type: "Deluxe", description: "A spacious room with thoughtful details and premium comfort.", pricePerNight: 4299, capacity: 3, image: "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=1200&q=80", amenities: ["Wi-Fi", "Breakfast", "King bed", "Mini fridge"], previewOnly: true },
+  { _id: "demo-signature-suite", name: "Signature Suite", type: "Suite", description: "Extra space to unwind, work, or celebrate a special occasion.", pricePerNight: 6999, capacity: 4, image: "https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1200&q=80", amenities: ["Wi-Fi", "Breakfast", "Living area", "King bed"], previewOnly: true },
+  { _id: "demo-garden-deluxe", name: "Garden Deluxe", type: "Deluxe", description: "A calm retreat with warm design and modern amenities.", pricePerNight: 3899, capacity: 3, image: "https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=1200&q=80", amenities: ["Wi-Fi", "Air conditioning", "Work desk"], previewOnly: true }
+];
 const money = (amount) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amount || 0);
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -55,6 +61,7 @@ export default function App() {
   async function refreshRooms() {
     try { setRooms(await api("/rooms")); setError(""); }
     catch (e) {
+      setRooms(demoRooms);
       setError(e.message || "Could not load rooms. Please try again later.");
     } finally { setLoading(false); }
   }
@@ -317,7 +324,7 @@ export default function App() {
           {visibleRooms.map((room, index) => <article className="room-card" key={room._id}>
             <div className="room-image-wrap"><img src={room.image || "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=1200&q=80"} alt={room.name} /><span className="room-type">{room.type}</span><span className="room-index">0{index + 1}</span></div>
             <div className="room-info"><div className="room-title-row"><h3>{room.name}</h3><span className="capacity">♧ {room.capacity}</span></div><p>{room.description}</p><div className="room-rating" aria-label={room.ratingCount ? `${room.ratingAverage} out of 5 stars, ${room.ratingCount} ratings` : "No ratings yet"}><span className={room.ratingCount ? "room-rating-stars has-rating" : "room-rating-stars"} aria-hidden="true">{[1, 2, 3, 4, 5].map((star) => <span key={star} className={room.ratingAverage >= star ? "filled" : ""}>★</span>)}</span>{room.ratingCount ? <span>{room.ratingAverage} · {room.ratingCount} {room.ratingCount === 1 ? "rating" : "ratings"}</span> : <span>No ratings yet</span>}</div><div className="amenities">{(room.amenities || []).slice(0, 3).map((a) => <span key={a}>{a}</span>)}</div>
-              <div className="room-bottom"><div><strong>{money(room.pricePerNight)}</strong><small> / night</small></div><button className="book-btn" onClick={() => startBooking(room)}>Book this room <span>↗</span></button></div>
+              <div className="room-bottom"><div><strong>{money(room.pricePerNight)}</strong><small> / night</small></div><button className="book-btn" disabled={room.previewOnly} title={room.previewOnly ? "Booking is unavailable while the booking service is offline." : undefined} onClick={() => startBooking(room)}>{room.previewOnly ? "Preview only" : <>Book this room <span>↗</span></>}</button></div>
             </div>
           </article>)}
           {!visibleRooms.length && <p className="empty">No rooms in this category yet. Try another filter.</p>}
