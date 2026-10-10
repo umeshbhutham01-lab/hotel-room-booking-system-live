@@ -43,6 +43,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [notice, setNotice] = useState("");
+  const [demoReceipt, setDemoReceipt] = useState(null);
   const [bookingError, setBookingError] = useState("");
   const [paymentMode, setPaymentMode] = useState("");
   const [form, setForm] = useState({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
@@ -121,9 +122,9 @@ export default function App() {
       ["Guests", booking.guests],
       ["Check-in", date(booking.checkIn)],
       ["Check-out", date(booking.checkOut)],
-      ["Payment", booking.paymentStatus],
-      ["Payment ID", booking.razorpayPaymentId],
-      ["Total paid", money(booking.totalPrice)]
+      ["Payment", booking.paymentStatus === "demo" ? "Demo booking — no payment collected" : booking.paymentStatus],
+      ...(booking.razorpayPaymentId ? [["Payment ID", booking.razorpayPaymentId]] : []),
+      [booking.paymentStatus === "paid" ? "Total paid" : "Booking total", money(booking.totalPrice)]
     ].map(([label, value]) => `<div class="row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
 
     receiptWindow.document.write(`<!doctype html>
@@ -137,7 +138,7 @@ export default function App() {
         .row span{color:#65756d}.row strong{text-align:right;overflow-wrap:anywhere}
         button{padding:12px 18px;border:0;background:#173a32;color:white;font-weight:bold;cursor:pointer}
         @media print{body{padding:0;background:white}main{border:0;padding:20px;max-width:none}button{display:none}}
-      </style></head><body><main><h1>Hotel Rooms</h1><p>Booking payment receipt</p>
+      </style></head><body><main><h1>Hotel Rooms</h1><p>Booking receipt</p>
       <div class="rows">${rows}</div><button onclick="window.print()">Print receipt</button></main></body></html>`);
     receiptWindow.document.close();
   }
@@ -151,7 +152,18 @@ export default function App() {
       }
       if (selected.previewOnly) {
         const reference = `DEMO-${Date.now().toString(36).toUpperCase()}`;
-        setNotice(`Demo booking confirmed for ${selected.name}. Reference: ${reference}. No payment was charged and this booking was not saved to the hotel database.`);
+        setDemoReceipt({
+          _id: reference,
+          guestName: form.guestName,
+          email: form.email,
+          room: selected,
+          guests: Number(form.guests),
+          checkIn: `${form.checkIn}T00:00:00`,
+          checkOut: `${form.checkOut}T00:00:00`,
+          paymentStatus: "demo",
+          totalPrice: nights * selected.pricePerNight
+        });
+        setNotice("Room booked.");
         setSelected(null);
         setForm({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
         setSubmitting(false);
@@ -221,6 +233,7 @@ export default function App() {
   function startBooking(room) {
     setSelected(room);
     setNotice("");
+    setDemoReceipt(null);
     setBookingError("");
     setPaymentMode("");
     setForm((prev) => ({ ...prev, guestName: user?.name || "", email: user?.email || "", guests: 1 }));
@@ -331,7 +344,7 @@ export default function App() {
           {["All", "Standard", "Deluxe", "Suite"].map((type) => <button key={type} className={filter === type ? "filter active" : "filter"} onClick={() => setFilter(type)}>{type}</button>)}
           <span className="room-count">{visibleRooms.length} SPACES TO DISCOVER</span>
         </div>
-        {notice && <div className="message success">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss">×</button></div>}
+        {notice && <div className="message success">{notice}{demoReceipt && <button type="button" onClick={() => printReceipt(demoReceipt)}>View receipt</button>}<button onClick={() => setNotice("")} aria-label="Dismiss">×</button></div>}
         {loading ? <div className="loading">Finding your room…</div> : <div className="room-grid">
           {visibleRooms.map((room, index) => <article className="room-card" key={room._id}>
             <div className="room-image-wrap"><img src={room.image || "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=1200&q=80"} alt={room.name} /><span className="room-type">{room.type}</span><span className="room-index">0{index + 1}</span></div>
