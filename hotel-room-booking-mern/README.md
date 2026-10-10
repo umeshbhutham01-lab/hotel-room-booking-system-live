@@ -14,7 +14,7 @@ The frontend is hosted on Vercel, the Express API on Render, and MongoDB on Mong
 
 `VITE_API_URL` is public frontend configuration; never put credentials in it. Keep MongoDB, JWT, and payment credentials only in Render's environment settings for production. For local development, copy `server/.env.example` to `server/.env` and set the real `MONGO_URI` there; `.env` is ignored by Git and must not be committed. The example URI is a template, not a working connection string.
 
-The room showcase uses a bundled demo catalog in `client/src/roomCatalog.js`, so room cards and filters render without an API connection. These catalog cards are display-only; login, bookings, and administrative actions still require the backend API.
+The room showcase uses a bundled demo catalog in `client/src/roomCatalog.js`, so room cards and filters render without an API connection. The demo checkout simulates payment without collecting card details or charging money, and saves demo bookings in the current browser only. Login and administrative actions still require the backend API; real reservations and payments are not created by the demo checkout.
 
 ## Features
 - Browse hotel rooms
