@@ -14,6 +14,14 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character
 const today = new Date().toISOString().slice(0, 10);
 const loadUser = () => { try { return JSON.parse(localStorage.getItem("haven_user") || "null"); } catch { return null; } };
 const loadToken = () => localStorage.getItem("haven_token") || "";
+const loadDemoBookings = () => {
+  try {
+    const bookings = JSON.parse(localStorage.getItem("haven_demo_bookings") || "[]");
+    return Array.isArray(bookings) ? bookings : [];
+  } catch {
+    return [];
+  }
+};
 
 async function api(path, options = {}) {
   const token = loadToken();
@@ -53,10 +61,13 @@ export default function App() {
   const [profileOpen, setProfileOpen] = useState(false);
   const profileMenuRef = useRef(null);
   const [myBookings, setMyBookings] = useState([]);
+  const [demoBookings, setDemoBookings] = useState(loadDemoBookings);
   const [ratingBusy, setRatingBusy] = useState("");
   const [adminSummary, setAdminSummary] = useState(null);
   const [adminBookings, setAdminBookings] = useState([]);
   const [adminRoomForm, setAdminRoomForm] = useState({ name: "", type: "Standard", description: "", pricePerNight: "2499", capacity: "2", image: "", amenities: "Wi-Fi, Air conditioning" });
+  const profileName = user?.name || demoBookings[0]?.guestName || user?.email || "Guest";
+  const profileEmail = user?.email || demoBookings[0]?.email || "";
 
   async function refreshRooms() {
     const controller = new AbortController();
@@ -152,7 +163,7 @@ export default function App() {
       }
       if (selected.previewOnly) {
         const reference = `DEMO-${Date.now().toString(36).toUpperCase()}`;
-        setDemoReceipt({
+        const receipt = {
           _id: reference,
           guestName: form.guestName,
           email: form.email,
@@ -160,10 +171,22 @@ export default function App() {
           guests: Number(form.guests),
           checkIn: `${form.checkIn}T00:00:00`,
           checkOut: `${form.checkOut}T00:00:00`,
+          status: "confirmed",
           paymentStatus: "demo",
           totalPrice: nights * selected.pricePerNight
-        });
-        setNotice("Room booked.");
+        };
+        const nextDemoBookings = [receipt, ...demoBookings];
+        setDemoBookings(nextDemoBookings);
+        let bookingSaved = true;
+        try {
+          localStorage.setItem("haven_demo_bookings", JSON.stringify(nextDemoBookings));
+        } catch (error) {
+          console.error("Failed to save demo booking on this device:", error);
+          bookingSaved = false;
+        }
+        setDemoReceipt(receipt);
+        setNotice(bookingSaved ? "Room booked." : "Room booked, but this booking could not be saved on this device.");
+        printReceipt(receipt);
         setSelected(null);
         setForm({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
         setSubmitting(false);
@@ -240,8 +263,15 @@ export default function App() {
   }
 
   async function fetchMyBookings() {
-    try { setMyBookings(await api("/bookings/mine")); setPanel("bookings"); }
-    catch (e) { setNotice(e.message); }
+    setProfileOpen(false);
+    if (user) {
+      try {
+        setMyBookings(await api("/bookings/mine"));
+      } catch (e) {
+        setNotice(`Could not load account bookings: ${e.message}`);
+      }
+    }
+    setPanel("bookings");
   }
 
   async function cancelBooking(id) {
@@ -294,24 +324,22 @@ export default function App() {
       <a className="brand" href="#"><span className="brand-mark">H</span><span>Hotel Rooms</span></a>
       <nav><a href="#rooms">Our rooms</a><a href="#experience">The experience</a><a href="#help">Help</a><a href="#contact">Contact us</a></nav>
       <div className="header-actions">
-        {user ? <>
-          {user.role === "admin" && <button className="text-action" onClick={fetchAdmin}>Admin</button>}
-          <div className="profile-menu" ref={profileMenuRef}>
-            <button className="profile-trigger" aria-haspopup="menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>
-              <span className="profile-avatar" aria-hidden="true">{(user.name || user.email || "U").trim().charAt(0).toUpperCase()}</span>
-              <span className="profile-trigger-name">{user.name || "My profile"}</span>
-              <span className="profile-chevron" aria-hidden="true">{profileOpen ? "⌃" : "⌄"}</span>
-            </button>
-            {profileOpen && <div className="profile-dropdown" role="menu">
-              <div className="profile-summary">
-                <span className="profile-avatar large" aria-hidden="true">{(user.name || user.email || "U").trim().charAt(0).toUpperCase()}</span>
-                <div><strong>{user.name || "Guest"}</strong><span>{user.email}</span><small>{user.role === "admin" ? "Administrator" : "Guest account"}</small></div>
-              </div>
-              <button role="menuitem" onClick={() => { setProfileOpen(false); fetchMyBookings(); }}>My bookings</button>
-              <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>
-            </div>}
-          </div>
-        </> : null}
+        {user?.role === "admin" && <button className="text-action" onClick={fetchAdmin}>Admin</button>}
+        <div className="profile-menu" ref={profileMenuRef}>
+          <button className="profile-trigger" aria-haspopup="menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>
+            <span className="profile-avatar" aria-hidden="true">{profileName.trim().charAt(0).toUpperCase()}</span>
+            <span className="profile-trigger-name">{profileName}</span>
+            <span className="profile-chevron" aria-hidden="true">{profileOpen ? "⌃" : "⌄"}</span>
+          </button>
+          {profileOpen && <div className="profile-dropdown" role="menu">
+            <div className="profile-summary">
+              <span className="profile-avatar large" aria-hidden="true">{profileName.trim().charAt(0).toUpperCase()}</span>
+              <div><strong>{profileName}</strong>{profileEmail && <span>{profileEmail}</span>}<small>{user?.role === "admin" ? "Administrator" : user ? "Guest account" : "Demo guest"}</small></div>
+            </div>
+            <button role="menuitem" onClick={fetchMyBookings}>My bookings</button>
+            {user && <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>}
+          </div>}
+        </div>
       </div>
     </header>
 
@@ -356,9 +384,9 @@ export default function App() {
         </div>}
       </section>
 
-      {panel === "bookings" && <section className="dashboard-section" id="account-panel">
-        <div className="dashboard-title"><div><div className="eyebrow dark"><span></span> YOUR ACCOUNT</div><h2>My <em>bookings.</em></h2></div><button className="filter" onClick={() => setPanel("")}>Close</button></div>
-        {!myBookings.length ? <p className="empty">You have no bookings yet.</p> : <div className="my-bookings-list">{myBookings.map(b => <article className="my-booking-card" key={b._id}>
+      {(panel === "bookings" || demoBookings.length > 0) && <section className="dashboard-section" id="account-panel">
+        <div className="dashboard-title"><div><div className="eyebrow dark"><span></span> YOUR BOOKINGS</div><h2>My <em>bookings.</em></h2></div>{panel === "bookings" && <button className="filter" onClick={() => setPanel("")}>Close</button>}</div>
+        {!myBookings.length && !demoBookings.length ? <p className="empty">You have no bookings yet.</p> : <div className="my-bookings-list">{[...myBookings, ...demoBookings].map(b => <article className="my-booking-card" key={b._id}>
           <div className="my-booking-heading">
             <div><div className="eyebrow dark"><span></span> BOOKING DETAILS</div><h3>{b.room?.name || "Room unavailable"}</h3><small>Booking reference · {b._id}</small></div>
             <span className={`status ${b.status}`}>{b.status.replace("_", " ")}</span>
@@ -375,8 +403,8 @@ export default function App() {
               <small>{b.rating ? `Your rating: ${b.rating}/5` : "Rate this room"}</small>
               <div className="rating-buttons">{[1, 2, 3, 4, 5].map((rating) => <button key={rating} type="button" className={b.rating >= rating ? "rating-star selected" : "rating-star"} aria-label={`Rate ${rating} out of 5 stars`} aria-pressed={b.rating === rating} disabled={ratingBusy === b._id} onClick={() => rateBooking(b._id, rating)}>★</button>)}</div>
             </div>}
-            {b.paymentStatus === "paid" && <button className="mini-btn" onClick={() => printReceipt(b)}>View receipt</button>}
-            {b.status !== "cancelled" && b.paymentStatus !== "paid" && <button className="mini-btn" onClick={() => cancelBooking(b._id)}>Cancel booking</button>}
+            {(b.paymentStatus === "paid" || b.paymentStatus === "demo") && <button className="mini-btn" onClick={() => printReceipt(b)}>View receipt</button>}
+            {b.status !== "cancelled" && b.paymentStatus !== "paid" && b.paymentStatus !== "demo" && <button className="mini-btn" onClick={() => cancelBooking(b._id)}>Cancel booking</button>}
           </div></div>
         </article>)}</div>}
       </section>}
