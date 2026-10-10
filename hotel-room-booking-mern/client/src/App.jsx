@@ -349,7 +349,7 @@ export default function App() {
       <nav><a href="#rooms">Our rooms</a><a href="#experience">The experience</a><a href="#help">Help</a><a href="#contact">Contact us</a></nav>
       <div className="header-actions">
         {user?.role === "admin" && <button className="text-action" onClick={fetchAdmin}>Admin</button>}
-        <div className="profile-menu" ref={profileMenuRef}>
+        {(user || demoProfile) ? <div className="profile-menu" ref={profileMenuRef}>
           <button className="profile-trigger" aria-haspopup="menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>
             <span className="profile-avatar" aria-hidden="true">{profileName.trim().charAt(0).toUpperCase()}</span>
             <span className="profile-trigger-name">{profileName}</span>
@@ -358,13 +358,12 @@ export default function App() {
           {profileOpen && <div className="profile-dropdown" role="menu">
             <div className="profile-summary">
               <span className="profile-avatar large" aria-hidden="true">{profileName.trim().charAt(0).toUpperCase()}</span>
-              <div><strong>{profileName}</strong>{profileEmail && <span>{profileEmail}</span>}<small>{user?.role === "admin" ? "Administrator" : user ? "Guest account" : demoProfile ? "Demo account" : "Demo guest"}</small></div>
+              <div><strong>{profileName}</strong>{profileEmail && <span>{profileEmail}</span>}<small>{user?.role === "admin" ? "Administrator" : user ? "Guest account" : "Demo account"}</small></div>
             </div>
             <button role="menuitem" onClick={fetchMyBookings}>My bookings</button>
-            {!user && !demoProfile && <button role="menuitem" onClick={() => { setProfileOpen(false); setDemoSignInForm({ name: "", email: "" }); setDemoSignInOpen(true); }}>Sign in</button>}
-            {(user || demoProfile) && <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>}
+            <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>
           </div>}
-        </div>
+        </div> : <button className="text-action" onClick={() => { setDemoSignInForm({ name: "", email: "" }); setDemoSignInOpen(true); }}>Sign in</button>}
       </div>
     </header>
 
