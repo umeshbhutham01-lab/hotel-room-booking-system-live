@@ -39,13 +39,10 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [notice, setNotice] = useState("");
   const [bookingError, setBookingError] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
   const [form, setForm] = useState({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
   const [submitting, setSubmitting] = useState(false);
   const [user, setUser] = useState(loadUser);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState("login");
-  const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
-  const [authBusy, setAuthBusy] = useState(false);
   const [panel, setPanel] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const profileMenuRef = useRef(null);
@@ -132,28 +129,8 @@ export default function App() {
       <div class="rows">${rows}</div><button onclick="window.print()">Print receipt</button></main></body></html>`);
     receiptWindow.document.close();
   }
-  async function authenticate(e) {
-    e.preventDefault(); setAuthBusy(true); setNotice("");
-    try {
-      const path = authMode === "register" ? "/auth/register" : "/auth/login";
-      const result = await api(path, { method: "POST", body: JSON.stringify(authForm) });
-      localStorage.setItem("haven_token", result.token);
-      localStorage.setItem("haven_user", JSON.stringify(result.user));
-      setUser(result.user); setAuthOpen(false); setAuthForm({ name: "", email: "", password: "" });
-      setNotice(`Welcome${result.user.name ? `, ${result.user.name}` : ""}!`);
-      if (selected) setForm((prev) => ({ ...prev, guestName: result.user.name, email: result.user.email }));
-    } catch (e) { setNotice(e.message); }
-    finally { setAuthBusy(false); }
-  }
-
   async function book(event) {
     event.preventDefault();
-    if (!user) {
-      setAuthMode("login");
-      setAuthOpen(true);
-      setNotice("Sign in or create an account before booking.");
-      return;
-    }
     if (!selected) return;
     setNotice(""); setBookingError(""); setSubmitting(true);
     try {
@@ -163,33 +140,59 @@ export default function App() {
       const ready = await loadRazorpay();
       if (!ready) throw new Error("Razorpay Checkout could not load. Check your internet connection.");
       const result = await api("/bookings", { method: "POST", body: JSON.stringify({ ...form, room: selected._id, guests: Number(form.guests) }) });
+      setPaymentMode(result.paymentMode);
+      let bookingFinished = false;
+      async function releasePendingBooking() {
+        if (bookingFinished) return false;
+        bookingFinished = true;
+        await api(`/bookings/${result.booking._id}/cancel`, {
+          method: "POST",
+          headers: { "X-Booking-Access-Token": result.bookingToken },
+          body: JSON.stringify({})
+        });
+        return true;
+      }
       const options = {
         key: result.keyId, amount: result.order.amount, currency: result.order.currency,
         name: "Haven Hotel", description: `Booking: ${selected.name}`, order_id: result.order.id,
         prefill: { name: form.guestName, email: form.email },
         theme: { color: "#1a3b33" },
         handler: async (response) => {
+          bookingFinished = true;
           try {
             const verified = await api(`/bookings/${result.booking._id}/verify-payment`, {
-              method: "POST", body: JSON.stringify(response)
+              method: "POST",
+              headers: { "X-Booking-Access-Token": result.bookingToken },
+              body: JSON.stringify(response)
             });
-            setNotice(verified.message || "Payment successful. Your booking is confirmed.");
+            setNotice(`${verified.message || "Payment successful. Your booking is confirmed."} Booking reference: ${result.booking._id}`);
             setSelected(null);
             setForm({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
-            await fetchMyBookings();
+            if (user) await fetchMyBookings();
           } catch (e) {
             setNotice(`${e.message} If money was deducted, keep your payment ID and contact the hotel.`);
           } finally { setSubmitting(false); }
         },
-        modal: { ondismiss: () => {
-          setSubmitting(false);
-          setNotice("Checkout closed. If you did not complete payment, check My Bookings before trying again.");
+        modal: { ondismiss: async () => {
+          try {
+            if (await releasePendingBooking()) {
+              setNotice("Checkout closed. The unpaid room reservation was released.");
+            }
+          } catch (e) {
+            setNotice(`Checkout closed, but the reservation could not be released: ${e.message}`);
+          } finally { setSubmitting(false); }
         } }
       };
       const checkout = new window.Razorpay(options);
-      checkout.on("payment.failed", (response) => {
+      checkout.on("payment.failed", async (response) => {
+        try {
+          if (await releasePendingBooking()) {
+            setNotice(response.error?.description || "Payment failed. The unpaid room reservation was released.");
+          }
+        } catch (e) {
+          setNotice(`Payment failed and the reservation could not be released: ${e.message}`);
+        }
         setSubmitting(false);
-        setNotice(response.error?.description || "Payment failed. You can try booking again.");
       });
       checkout.open();
     } catch (e) { setBookingError(e.message); setSubmitting(false); }
@@ -199,6 +202,7 @@ export default function App() {
     setSelected(room);
     setNotice("");
     setBookingError("");
+    setPaymentMode("");
     setForm((prev) => ({ ...prev, guestName: user?.name || "", email: user?.email || "", guests: 1 }));
   }
 
@@ -274,10 +278,7 @@ export default function App() {
               <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>
             </div>}
           </div>
-        </> : <>
-          <button className="text-action" onClick={() => { setAuthMode("register"); setAuthOpen(true); }}>Create account</button>
-          <button className="nav-cta" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}>Sign in <span>↗</span></button>
-        </>}
+        </> : null}
       </div>
     </header>
 
@@ -396,7 +397,6 @@ export default function App() {
         <button className="modal-close" onClick={() => !submitting && setSelected(null)} aria-label="Close">×</button>
         <div className="eyebrow dark"><span></span> YOUR STAY STARTS HERE</div><h2 id="booking-title">Book your <em>room.</em></h2>
         <div className="modal-room"><img src={selected.image} alt="" /><div><b>{selected.name}</b><small>{selected.type} · up to {selected.capacity} guests</small><strong>{money(selected.pricePerNight)} <small>/ night</small></strong></div></div>
-        {!user && <p className="auth-hint">Sign in or create an account before confirming your booking.</p>}
         <form onSubmit={book}>
           <label>Full name<input required value={form.guestName} onChange={(e) => update("guestName", e.target.value)} placeholder="Your name" /></label>
           <label>Email address<input required type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@example.com" /></label>
@@ -405,25 +405,11 @@ export default function App() {
           {nights > 0 && <div className="total-row"><span>{nights} night{nights > 1 ? "s" : ""} × {money(selected.pricePerNight)}</span><strong>{money(nights * selected.pricePerNight)}</strong></div>}
           <div className="booking-form-actions">
             <button className="booking-back-btn" type="button" disabled={submitting} onClick={() => { setSelected(null); setBookingError(""); }}>← Back</button>
-            <button className="submit-btn" disabled={submitting}>{submitting ? "Opening secure checkout…" : user ? "Continue to payment" : "Sign in to book"} <span>↗</span></button>
+            <button className="submit-btn" disabled={submitting}>{submitting ? "Opening secure checkout…" : "Continue to Razorpay"} <span>↗</span></button>
           </div>
           {bookingError && <p className="booking-error" role="alert">{bookingError}</p>}
-          <small className="form-note">Payments are processed securely by Razorpay.</small>
+          <small className="form-note">{paymentMode === "test" ? "Razorpay test mode · no real money is charged." : paymentMode === "live" ? "Razorpay live mode · a real payment will be charged." : "Payment is processed securely by Razorpay."}</small>
         </form>
-      </section>
-    </div>}
-
-    {authOpen && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setAuthOpen(false); }}>
-      <section className="booking-modal auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-        <button className="modal-close" onClick={() => setAuthOpen(false)} aria-label="Close">×</button>
-        <div className="eyebrow dark"><span></span> WELCOME TO HAVEN</div><h2 id="auth-title">{authMode === "login" ? <>Welcome <em>back.</em></> : <>Create your <em>account.</em></>}</h2>
-        <form onSubmit={authenticate}>
-          {authMode === "register" && <label>Full name<input required value={authForm.name} onChange={e=>setAuthForm({...authForm,name:e.target.value})} placeholder="Your name"/></label>}
-          <label>Email address<input required type="email" value={authForm.email} onChange={e=>setAuthForm({...authForm,email:e.target.value})} placeholder="you@example.com"/></label>
-          <label>Password<input required type="password" minLength={8} value={authForm.password} onChange={e=>setAuthForm({...authForm,password:e.target.value})} placeholder="At least 8 characters"/></label>
-          <button className="submit-btn" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "login" ? "Sign in" : "Create account"} <span>↗</span></button>
-        </form>
-        <p className="switch-auth">{authMode === "login" ? "New to Haven?" : "Already have an account?"} <button onClick={() => setAuthMode(authMode === "login" ? "register" : "login")}>{authMode === "login" ? "Create an account" : "Sign in"}</button></p>
       </section>
     </div>}
   </div>;

@@ -1,9 +1,8 @@
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
-import Room from "./models/Room.js";
 import User from "./models/User.js";
-import demoRooms from "./demoRooms.js";
+import { seedDemoRooms } from "./seedDemoRooms.js";
 
 dotenv.config();
 
@@ -12,7 +11,8 @@ try {
     throw new Error("MONGO_URI is required. Set it in server/.env before running the seed script.");
   }
   await mongoose.connect(process.env.MONGO_URI);
-  if (await Room.countDocuments() === 0) await Room.insertMany(demoRooms);
+  const seededRooms = await seedDemoRooms();
+  console.log(`${seededRooms} missing demo rooms added.`);
   const adminEmail = (process.env.ADMIN_EMAIL || "admin@haven.local").toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD || "";
   if (adminPassword && adminPassword.length >= 12) {

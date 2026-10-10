@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import mongoose from "mongoose";
 import Booking from "../models/Booking.js";
 import Room from "../models/Room.js";
-import { requireAuth, requireAdmin } from "../middleware/auth.js";
+import { optionalAuth, requireAuth, requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -21,6 +21,21 @@ function getRazorpay() {
 }
 import Razorpay from "razorpay";
 
+function hasBookingAccess(req, booking) {
+  if (req.user && booking.user && booking.user.equals(req.user._id)) return true;
+  const token = req.headers["x-booking-access-token"];
+  if (typeof token !== "string" || !booking.guestAccessTokenHash) return false;
+  const suppliedHash = crypto.createHash("sha256").update(token).digest();
+  const storedHash = Buffer.from(booking.guestAccessTokenHash, "hex");
+  return suppliedHash.length === storedHash.length && crypto.timingSafeEqual(suppliedHash, storedHash);
+}
+
+function publicBooking(booking) {
+  const result = booking.toObject();
+  delete result.guestAccessTokenHash;
+  return result;
+}
+
 router.get("/mine", requireAuth, async (req, res, next) => {
   try {
     const bookings = await Booking.find({ user: req.user._id }).populate("room").sort({ createdAt: -1 });
@@ -35,7 +50,7 @@ router.get("/", requireAuth, requireAdmin, async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post("/", requireAuth, async (req, res, next) => {
+router.post("/", optionalAuth, async (req, res, next) => {
   try {
     const { room: roomId, guestName, email, checkIn, checkOut, guests } = req.body;
     if (!mongoose.isValidObjectId(roomId)) return res.status(400).json({ message: "Please select a valid room." });
@@ -69,6 +84,8 @@ router.post("/", requireAuth, async (req, res, next) => {
     const totalPrice = nights * room.pricePerNight;
     const razorpay = getRazorpay();
     const bookingId = new mongoose.Types.ObjectId();
+    const bookingToken = crypto.randomBytes(32).toString("hex");
+    const guestAccessTokenHash = crypto.createHash("sha256").update(bookingToken).digest("hex");
     const reservedRoom = await Room.findOneAndUpdate(
       {
         _id: room._id,
@@ -91,12 +108,16 @@ router.post("/", requireAuth, async (req, res, next) => {
       order = await razorpay.orders.create({
         amount: Math.round(totalPrice * 100),
         currency: "INR",
-        receipt: `hb_${Date.now()}_${req.user._id.toString().slice(-6)}`,
-        notes: { roomId: room._id.toString(), userId: req.user._id.toString() }
+        receipt: `hb_${Date.now()}_${bookingId.toString().slice(-6)}`,
+        notes: {
+          roomId: room._id.toString(),
+          ...(req.user ? { userId: req.user._id.toString() } : {})
+        }
       });
 
       booking = await Booking.create({
-        _id: bookingId, room: room._id, user: req.user._id, guestName: guestName.trim(),
+        _id: bookingId, room: room._id, ...(req.user ? { user: req.user._id } : {}),
+        guestAccessTokenHash, guestName: guestName.trim(),
         email: email.trim().toLowerCase(), checkIn: start, checkOut: end,
         guests: guestCount, totalPrice, status: "pending_payment",
         paymentStatus: "unpaid", razorpayOrderId: order.id
@@ -111,18 +132,20 @@ router.post("/", requireAuth, async (req, res, next) => {
     }
 
     res.status(201).json({
-      booking,
+      booking: publicBooking(booking),
+      bookingToken,
       order: { id: order.id, amount: order.amount, currency: order.currency },
-      keyId: process.env.RAZORPAY_KEY_ID
+      keyId: process.env.RAZORPAY_KEY_ID,
+      paymentMode: process.env.RAZORPAY_KEY_ID.startsWith("rzp_test_") ? "test" : "live"
     });
   } catch (err) { next(err); }
 });
 
-router.post("/:id/verify-payment", requireAuth, async (req, res, next) => {
+router.post("/:id/verify-payment", optionalAuth, async (req, res, next) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-    const booking = await Booking.findOne({ _id: req.params.id, user: req.user._id });
-    if (!booking) return res.status(404).json({ message: "Booking not found." });
+    const booking = await Booking.findById(req.params.id).select("+guestAccessTokenHash");
+    if (!booking || !hasBookingAccess(req, booking)) return res.status(404).json({ message: "Booking not found." });
     if (booking.razorpayOrderId !== razorpay_order_id) return res.status(400).json({ message: "Payment order does not match this booking." });
     if (!razorpay_payment_id || !razorpay_signature) return res.status(400).json({ message: "Payment verification details are missing." });
 
@@ -151,15 +174,16 @@ router.post("/:id/verify-payment", requireAuth, async (req, res, next) => {
     booking.paymentStatus = "paid";
     booking.razorpayPaymentId = razorpay_payment_id;
     await booking.save();
-    res.json({ message: "Payment verified and booking confirmed.", booking });
+    res.json({ message: "Payment verified and booking confirmed.", booking: publicBooking(booking) });
   } catch (err) { next(err); }
 });
 
-router.post("/:id/cancel", requireAuth, async (req, res, next) => {
+router.post("/:id/cancel", optionalAuth, async (req, res, next) => {
   try {
-    const filter = req.user.role === "admin" ? { _id: req.params.id } : { _id: req.params.id, user: req.user._id };
-    const booking = await Booking.findOne(filter);
-    if (!booking) return res.status(404).json({ message: "Booking not found." });
+    const booking = await Booking.findById(req.params.id).select("+guestAccessTokenHash");
+    if (!booking || (req.user?.role !== "admin" && !hasBookingAccess(req, booking))) {
+      return res.status(404).json({ message: "Booking not found." });
+    }
     if (booking.status === "cancelled") return res.status(400).json({ message: "This booking is already cancelled." });
     if (booking.status === "confirmed" && booking.paymentStatus === "paid") {
       return res.status(400).json({ message: "This booking has been paid. Automatic refunds are not enabled; contact the hotel administrator to process a refund." });
@@ -168,7 +192,7 @@ router.post("/:id/cancel", requireAuth, async (req, res, next) => {
     booking.status = "cancelled";
     booking.cancelledAt = new Date();
     await booking.save();
-    res.json({ message: "Booking cancelled.", booking });
+    res.json({ message: "Booking cancelled.", booking: publicBooking(booking) });
   } catch (err) { next(err); }
 });
 

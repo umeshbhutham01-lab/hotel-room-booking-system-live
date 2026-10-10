@@ -8,8 +8,7 @@ import bookingRoutes from "./routes/bookings.js";
 import authRoutes from "./routes/auth.js";
 import adminRoutes from "./routes/admin.js";
 import Booking from "./models/Booking.js";
-import Room from "./models/Room.js";
-import demoRooms from "./demoRooms.js";
+import { seedDemoRooms } from "./seedDemoRooms.js";
 
 dotenv.config();
 const app = express();
@@ -73,10 +72,8 @@ async function startServer() {
     throw new Error("MONGO_URI is required. Set it in the Render environment or server/.env.");
   }
   await mongoose.connect(process.env.MONGO_URI);
-  if (await Room.countDocuments() === 0) {
-    await Room.insertMany(demoRooms);
-    console.log(`Seeded ${demoRooms.length} demo rooms.`);
-  }
+  const seededRooms = await seedDemoRooms();
+  if (seededRooms) console.log(`Seeded ${seededRooms} missing demo rooms.`);
   app.listen(PORT, () => console.log(`API listening on port ${PORT}`));
 }
 
