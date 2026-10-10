@@ -59,11 +59,19 @@ export default function App() {
   const [adminRoomForm, setAdminRoomForm] = useState({ name: "", type: "Standard", description: "", pricePerNight: "2499", capacity: "2", image: "", amenities: "Wi-Fi, Air conditioning" });
 
   async function refreshRooms() {
-    try { setRooms(await api("/rooms")); setError(""); }
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 10000);
+    setLoading(true);
+    setError("");
+    try { setRooms(await api("/rooms", { signal: controller.signal })); setError(""); }
     catch (e) {
+      console.error("Failed to load live rooms:", e);
       setRooms(demoRooms);
-      setError(e.message || "Could not load rooms. Please try again later.");
-    } finally { setLoading(false); }
+      setError("Live room data is unavailable. Showing demo previews; booking is unavailable until the booking service reconnects.");
+    } finally {
+      window.clearTimeout(timeoutId);
+      setLoading(false);
+    }
   }
   useEffect(() => {
     refreshRooms();
@@ -318,7 +326,7 @@ export default function App() {
           {["All", "Standard", "Deluxe", "Suite"].map((type) => <button key={type} className={filter === type ? "filter active" : "filter"} onClick={() => setFilter(type)}>{type}</button>)}
           <span className="room-count">{visibleRooms.length} SPACES TO DISCOVER</span>
         </div>
-        {error && <div className="message error" role="alert">{error}</div>}
+        {error && <div className="message error" role="alert">{error}<button type="button" disabled={loading} onClick={refreshRooms}>Retry</button></div>}
         {notice && <div className="message success">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss">×</button></div>}
         {loading ? <div className="loading">Finding your room…</div> : <div className="room-grid">
           {visibleRooms.map((room, index) => <article className="room-card" key={room._id}>
