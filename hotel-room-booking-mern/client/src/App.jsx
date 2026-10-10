@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import roomCatalog from "./roomCatalog.js";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const money = (amount) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amount || 0);
@@ -32,10 +33,8 @@ function loadRazorpay() {
 }
 
 export default function App() {
-  const [rooms, setRooms] = useState([]);
+  const rooms = roomCatalog;
   const [filter, setFilter] = useState("All");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
   const [notice, setNotice] = useState("");
   const [bookingError, setBookingError] = useState("");
@@ -55,12 +54,6 @@ export default function App() {
   const [adminBookings, setAdminBookings] = useState([]);
   const [adminRoomForm, setAdminRoomForm] = useState({ name: "", type: "Standard", description: "", pricePerNight: "2499", capacity: "2", image: "", amenities: "Wi-Fi, Air conditioning" });
 
-  const refreshRooms = async () => {
-    try { setRooms(await api("/rooms")); setError(""); }
-    catch { setError("Can't connect to the API. Start the backend and make sure MongoDB is running."); }
-    finally { setLoading(false); }
-  };
-  useEffect(() => { refreshRooms(); }, []);
   useEffect(() => {
     if (panel === "bookings") {
       document.getElementById("account-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -204,7 +197,7 @@ export default function App() {
         body: JSON.stringify({ rating })
       });
       setNotice(result.message);
-      await Promise.all([fetchMyBookings(), refreshRooms()]);
+      await fetchMyBookings();
     } catch (e) { setNotice(e.message); }
     finally { setRatingBusy(""); }
   }
@@ -220,12 +213,12 @@ export default function App() {
       const payload = { ...adminRoomForm, pricePerNight: Number(adminRoomForm.pricePerNight), capacity: Number(adminRoomForm.capacity), amenities: adminRoomForm.amenities.split(",").map(s => s.trim()).filter(Boolean) };
       await api("/admin/rooms", { method: "POST", body: JSON.stringify(payload) });
       setNotice("Room added successfully."); setAdminRoomForm({ name: "", type: "Standard", description: "", pricePerNight: "2499", capacity: "2", image: "", amenities: "Wi-Fi, Air conditioning" });
-      await refreshRooms(); await fetchAdmin();
+      await fetchAdmin();
     } catch (e) { setNotice(e.message); }
   }
   async function deleteRoom(id) {
     if (!window.confirm("Delete this room? Rooms with active bookings cannot be deleted.")) return;
-    try { await api(`/admin/rooms/${id}`, { method: "DELETE" }); setNotice("Room deleted."); await refreshRooms(); await fetchAdmin(); }
+    try { await api(`/admin/rooms/${id}`, { method: "DELETE" }); setNotice("Room deleted."); await fetchAdmin(); }
     catch (e) { setNotice(e.message); }
   }
 
@@ -284,17 +277,17 @@ export default function App() {
           {["All", "Standard", "Deluxe", "Suite"].map((type) => <button key={type} className={filter === type ? "filter active" : "filter"} onClick={() => setFilter(type)}>{type}</button>)}
           <span className="room-count">{visibleRooms.length} SPACES TO DISCOVER</span>
         </div>
-        {error && <div className="message error">{error}</div>}
         {notice && <div className="message success">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss">×</button></div>}
-        {loading ? <div className="loading">Finding your room…</div> : <div className="room-grid">
+        <div className="message">Room previews are available now. Online booking is temporarily unavailable.</div>
+        <div className="room-grid">
           {visibleRooms.map((room, index) => <article className="room-card" key={room._id}>
             <div className="room-image-wrap"><img src={room.image || "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=1200&q=80"} alt={room.name} /><span className="room-type">{room.type}</span><span className="room-index">0{index + 1}</span></div>
             <div className="room-info"><div className="room-title-row"><h3>{room.name}</h3><span className="capacity">♧ {room.capacity}</span></div><p>{room.description}</p><div className="room-rating" aria-label={room.ratingCount ? `${room.ratingAverage} out of 5 stars, ${room.ratingCount} ratings` : "No ratings yet"}><span className={room.ratingCount ? "room-rating-stars has-rating" : "room-rating-stars"} aria-hidden="true">{[1, 2, 3, 4, 5].map((star) => <span key={star} className={room.ratingAverage >= star ? "filled" : ""}>★</span>)}</span>{room.ratingCount ? <span>{room.ratingAverage} · {room.ratingCount} {room.ratingCount === 1 ? "rating" : "ratings"}</span> : <span>No ratings yet</span>}</div><div className="amenities">{(room.amenities || []).slice(0, 3).map((a) => <span key={a}>{a}</span>)}</div>
-              <div className="room-bottom"><div><strong>{money(room.pricePerNight)}</strong><small> / night</small></div><button className="book-btn" onClick={() => { setSelected(room); setNotice(""); setBookingError(""); if (user) setForm(prev => ({ ...prev, guestName: user.name, email: user.email, guests: 1 })); }}>Book this room <span>↗</span></button></div>
+              <div className="room-bottom"><div><strong>{money(room.pricePerNight)}</strong><small> / night</small></div><button className="book-btn" disabled title="Online booking is temporarily unavailable">Booking unavailable</button></div>
             </div>
           </article>)}
-          {!visibleRooms.length && !error && <p className="empty">No rooms in this category yet. Try another filter.</p>}
-        </div>}
+          {!visibleRooms.length && <p className="empty">No rooms in this category yet. Try another filter.</p>}
+        </div>
       </section>
 
       {panel === "bookings" && <section className="dashboard-section" id="account-panel">

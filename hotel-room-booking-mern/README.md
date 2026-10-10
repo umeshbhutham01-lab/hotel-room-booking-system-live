@@ -6,13 +6,15 @@ A starter full-stack hotel room booking application built with MongoDB, Express,
 
 The frontend is hosted on Vercel, the Express API on Render, and MongoDB on MongoDB Atlas (or another hosted MongoDB service).
 
-1. Create a hosted MongoDB database and copy its connection string.
+1. Create a hosted MongoDB database and copy its connection string. In the URI, specify the `hotel_booking` database and replace the username, password, and cluster host with your Atlas values. URL-encode any reserved characters in the password.
 2. In Vercel, import this repository and set the project **Root Directory** to `hotel-room-booking-mern/client`. Use `npm run build` as the build command and `dist` as the output directory.
 3. Deploy the API using the `render.yaml` Blueprint at the repository root. Set `MONGO_URI`, `CLIENT_URL`, `RAZORPAY_KEY_ID`, and `RAZORPAY_KEY_SECRET` in the Render service environment. Render generates `JWT_SECRET` for the service. The `CLIENT_URL` value is the Vercel site's origin, with no path or trailing slash.
 4. After the API is deployed, set Vercel's `VITE_API_URL` environment variable to the public Render API URL with `/api` appended (for example, `https://your-api.onrender.com/api`) and redeploy the frontend.
 5. Set `CLIENT_URL` in Render to the Vercel site's origin and redeploy the API so browser requests from the frontend are allowed.
 
-`VITE_API_URL` is public frontend configuration; never put credentials in it. Keep MongoDB, JWT, and payment credentials only in Render's environment settings.
+`VITE_API_URL` is public frontend configuration; never put credentials in it. Keep MongoDB, JWT, and payment credentials only in Render's environment settings for production. For local development, copy `server/.env.example` to `server/.env` and set the real `MONGO_URI` there; `.env` is ignored by Git and must not be committed. The example URI is a template, not a working connection string.
+
+The room showcase uses a bundled demo catalog in `client/src/roomCatalog.js`, so room cards and filters render without an API connection. These catalog cards are display-only; login, bookings, and administrative actions still require the backend API.
 
 ## Features
 - Browse hotel rooms
@@ -34,7 +36,7 @@ The frontend is hosted on Vercel, the Express API on Render, and MongoDB on Mong
 ```bash
 cd server
 cp .env.example .env
-# Edit MONGO_URI if needed
+# Replace the MONGO_URI template with your local or Atlas connection string
 npm install
 npm run dev
 ```
