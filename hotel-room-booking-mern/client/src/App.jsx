@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import roomCatalog from "./roomCatalog.js";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const money = (amount) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amount || 0);
@@ -9,10 +8,6 @@ const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character
 const today = new Date().toISOString().slice(0, 10);
 const loadUser = () => { try { return JSON.parse(localStorage.getItem("haven_user") || "null"); } catch { return null; } };
 const loadToken = () => localStorage.getItem("haven_token") || "";
-const loadDemoBookings = () => {
-  try { return JSON.parse(localStorage.getItem("haven_demo_bookings") || "[]"); }
-  catch { return []; }
-};
 
 async function api(path, options = {}) {
   const token = loadToken();
@@ -25,12 +20,23 @@ async function api(path, options = {}) {
   return data;
 }
 
+function loadRazorpay() {
+  return new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
 export default function App() {
-  const rooms = roomCatalog;
+  const [rooms, setRooms] = useState([]);
   const [filter, setFilter] = useState("All");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [selected, setSelected] = useState(null);
-  const [demoPaymentOpen, setDemoPaymentOpen] = useState(false);
-  const [demoBookings, setDemoBookings] = useState(loadDemoBookings);
   const [notice, setNotice] = useState("");
   const [bookingError, setBookingError] = useState("");
   const [form, setForm] = useState({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
@@ -49,8 +55,17 @@ export default function App() {
   const [adminBookings, setAdminBookings] = useState([]);
   const [adminRoomForm, setAdminRoomForm] = useState({ name: "", type: "Standard", description: "", pricePerNight: "2499", capacity: "2", image: "", amenities: "Wi-Fi, Air conditioning" });
 
+  async function refreshRooms() {
+    try { setRooms(await api("/rooms")); setError(""); }
+    catch (e) {
+      setError(e.message || "Could not load rooms. Please try again later.");
+    } finally { setLoading(false); }
+  }
   useEffect(() => {
-    if (panel === "bookings" || panel === "demo-bookings") {
+    refreshRooms();
+  }, []);
+  useEffect(() => {
+    if (panel === "bookings") {
       document.getElementById("account-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [panel]);
@@ -133,50 +148,65 @@ export default function App() {
 
   async function book(event) {
     event.preventDefault();
+    if (!user) {
+      setAuthMode("login");
+      setAuthOpen(true);
+      setNotice("Sign in or create an account before booking.");
+      return;
+    }
     if (!selected) return;
     setNotice(""); setBookingError(""); setSubmitting(true);
     try {
       if (!form.checkIn || !form.checkOut || new Date(form.checkOut) <= new Date(form.checkIn)) {
         throw new Error("Choose a check-out date after your check-in date.");
       }
-      setDemoPaymentOpen(true);
-    } catch (e) { setBookingError(e.message); }
-    finally { setSubmitting(false); }
+      const ready = await loadRazorpay();
+      if (!ready) throw new Error("Razorpay Checkout could not load. Check your internet connection.");
+      const result = await api("/bookings", { method: "POST", body: JSON.stringify({ ...form, room: selected._id, guests: Number(form.guests) }) });
+      const options = {
+        key: result.keyId, amount: result.order.amount, currency: result.order.currency,
+        name: "Haven Hotel", description: `Booking: ${selected.name}`, order_id: result.order.id,
+        prefill: { name: form.guestName, email: form.email },
+        theme: { color: "#1a3b33" },
+        handler: async (response) => {
+          try {
+            const verified = await api(`/bookings/${result.booking._id}/verify-payment`, {
+              method: "POST", body: JSON.stringify(response)
+            });
+            setNotice(verified.message || "Payment successful. Your booking is confirmed.");
+            setSelected(null);
+            setForm({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
+            await fetchMyBookings();
+          } catch (e) {
+            setNotice(`${e.message} If money was deducted, keep your payment ID and contact the hotel.`);
+          } finally { setSubmitting(false); }
+        },
+        modal: { ondismiss: () => {
+          setSubmitting(false);
+          setNotice("Checkout closed. If you did not complete payment, check My Bookings before trying again.");
+        } }
+      };
+      const checkout = new window.Razorpay(options);
+      checkout.on("payment.failed", (response) => {
+        setSubmitting(false);
+        setNotice(response.error?.description || "Payment failed. You can try booking again.");
+      });
+      checkout.open();
+    } catch (e) { setBookingError(e.message); setSubmitting(false); }
   }
 
-  function completeDemoPayment() {
-    if (!selected) return;
-    const booking = {
-      _id: `DEMO-${Date.now()}`,
-      room: selected,
-      guestName: form.guestName.trim(),
-      email: form.email.trim(),
-      checkIn: form.checkIn,
-      checkOut: form.checkOut,
-      guests: Number(form.guests),
-      totalPrice: nights * selected.pricePerNight,
-      status: "confirmed",
-      paymentStatus: "demo_paid",
-      createdAt: new Date().toISOString()
-    };
-    const nextBookings = [booking, ...demoBookings];
-    try {
-      localStorage.setItem("haven_demo_bookings", JSON.stringify(nextBookings));
-      setDemoBookings(nextBookings);
-      setNotice("Demo booking confirmed. No real payment was taken.");
-      setSelected(null);
-      setDemoPaymentOpen(false);
-      setForm({ guestName: "", email: "", checkIn: "", checkOut: "", guests: 1 });
-      setPanel("demo-bookings");
-    } catch {
-      setBookingError("Could not save the demo booking in this browser. Check your available storage and try again.");
-    }
+  function startBooking(room) {
+    setSelected(room);
+    setNotice("");
+    setBookingError("");
+    setForm((prev) => ({ ...prev, guestName: user?.name || "", email: user?.email || "", guests: 1 }));
   }
 
   async function fetchMyBookings() {
     try { setMyBookings(await api("/bookings/mine")); setPanel("bookings"); }
     catch (e) { setNotice(e.message); }
   }
+
   async function cancelBooking(id) {
     if (!window.confirm("Cancel this unpaid/pending booking? Paid bookings require the hotel to process a refund.")) return;
     try {
@@ -185,6 +215,7 @@ export default function App() {
       if (user?.role === "admin") await fetchAdmin();
     } catch (e) { setNotice(e.message); }
   }
+
   async function rateBooking(bookingId, rating) {
     setRatingBusy(bookingId);
     try {
@@ -193,28 +224,31 @@ export default function App() {
         body: JSON.stringify({ rating })
       });
       setNotice(result.message);
-      await fetchMyBookings();
+      await Promise.all([fetchMyBookings(), refreshRooms()]);
     } catch (e) { setNotice(e.message); }
     finally { setRatingBusy(""); }
   }
+
   async function fetchAdmin() {
     try {
       const [summary, bookings] = await Promise.all([api("/admin/summary"), api("/bookings")]);
       setAdminSummary(summary); setAdminBookings(bookings); setPanel("admin");
     } catch (e) { setNotice(e.message); }
   }
+
   async function addRoom(e) {
     e.preventDefault();
     try {
       const payload = { ...adminRoomForm, pricePerNight: Number(adminRoomForm.pricePerNight), capacity: Number(adminRoomForm.capacity), amenities: adminRoomForm.amenities.split(",").map(s => s.trim()).filter(Boolean) };
       await api("/admin/rooms", { method: "POST", body: JSON.stringify(payload) });
       setNotice("Room added successfully."); setAdminRoomForm({ name: "", type: "Standard", description: "", pricePerNight: "2499", capacity: "2", image: "", amenities: "Wi-Fi, Air conditioning" });
-      await fetchAdmin();
+      await refreshRooms(); await fetchAdmin();
     } catch (e) { setNotice(e.message); }
   }
+
   async function deleteRoom(id) {
     if (!window.confirm("Delete this room? Rooms with active bookings cannot be deleted.")) return;
-    try { await api(`/admin/rooms/${id}`, { method: "DELETE" }); setNotice("Room deleted."); await fetchAdmin(); }
+    try { await api(`/admin/rooms/${id}`, { method: "DELETE" }); setNotice("Room deleted."); await refreshRooms(); await fetchAdmin(); }
     catch (e) { setNotice(e.message); }
   }
 
@@ -223,7 +257,6 @@ export default function App() {
       <a className="brand" href="#"><span className="brand-mark">H</span><span>Hotel Rooms</span></a>
       <nav><a href="#rooms">Our rooms</a><a href="#experience">The experience</a><a href="#help">Help</a><a href="#contact">Contact us</a></nav>
       <div className="header-actions">
-        <button className="text-action" onClick={() => setPanel("demo-bookings")}>Demo bookings ({demoBookings.length})</button>
         {user ? <>
           {user.role === "admin" && <button className="text-action" onClick={fetchAdmin}>Admin</button>}
           <div className="profile-menu" ref={profileMenuRef}>
@@ -241,7 +274,10 @@ export default function App() {
               <button role="menuitem" onClick={() => { setProfileOpen(false); signOut(); }}>Sign out</button>
             </div>}
           </div>
-        </> : <button className="nav-cta" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}>Sign in <span>↗</span></button>}
+        </> : <>
+          <button className="text-action" onClick={() => { setAuthMode("register"); setAuthOpen(true); }}>Create account</button>
+          <button className="nav-cta" onClick={() => { setAuthMode("login"); setAuthOpen(true); }}>Sign in <span>↗</span></button>
+        </>}
       </div>
     </header>
 
@@ -274,17 +310,17 @@ export default function App() {
           {["All", "Standard", "Deluxe", "Suite"].map((type) => <button key={type} className={filter === type ? "filter active" : "filter"} onClick={() => setFilter(type)}>{type}</button>)}
           <span className="room-count">{visibleRooms.length} SPACES TO DISCOVER</span>
         </div>
+        {error && <div className="message error" role="alert">{error}</div>}
         {notice && <div className="message success">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss">×</button></div>}
-        <div className="message">Demo rooms and checkout only. No real reservation or payment is created.</div>
-        <div className="room-grid">
+        {loading ? <div className="loading">Finding your room…</div> : <div className="room-grid">
           {visibleRooms.map((room, index) => <article className="room-card" key={room._id}>
             <div className="room-image-wrap"><img src={room.image || "https://images.unsplash.com/photo-1611892440504-42a792e24d32?auto=format&fit=crop&w=1200&q=80"} alt={room.name} /><span className="room-type">{room.type}</span><span className="room-index">0{index + 1}</span></div>
             <div className="room-info"><div className="room-title-row"><h3>{room.name}</h3><span className="capacity">♧ {room.capacity}</span></div><p>{room.description}</p><div className="room-rating" aria-label={room.ratingCount ? `${room.ratingAverage} out of 5 stars, ${room.ratingCount} ratings` : "No ratings yet"}><span className={room.ratingCount ? "room-rating-stars has-rating" : "room-rating-stars"} aria-hidden="true">{[1, 2, 3, 4, 5].map((star) => <span key={star} className={room.ratingAverage >= star ? "filled" : ""}>★</span>)}</span>{room.ratingCount ? <span>{room.ratingAverage} · {room.ratingCount} {room.ratingCount === 1 ? "rating" : "ratings"}</span> : <span>No ratings yet</span>}</div><div className="amenities">{(room.amenities || []).slice(0, 3).map((a) => <span key={a}>{a}</span>)}</div>
-              <div className="room-bottom"><div><strong>{money(room.pricePerNight)}</strong><small> / night</small></div><button className="book-btn" onClick={() => { setSelected(room); setDemoPaymentOpen(false); setNotice(""); setBookingError(""); setForm((prev) => ({ ...prev, guestName: user?.name || "", email: user?.email || "", guests: 1 })); }}>Demo book this room <span>↗</span></button></div>
+              <div className="room-bottom"><div><strong>{money(room.pricePerNight)}</strong><small> / night</small></div><button className="book-btn" onClick={() => startBooking(room)}>Book this room <span>↗</span></button></div>
             </div>
           </article>)}
           {!visibleRooms.length && <p className="empty">No rooms in this category yet. Try another filter.</p>}
-        </div>
+        </div>}
       </section>
 
       {panel === "bookings" && <section className="dashboard-section" id="account-panel">
@@ -309,25 +345,6 @@ export default function App() {
             {b.paymentStatus === "paid" && <button className="mini-btn" onClick={() => printReceipt(b)}>View receipt</button>}
             {b.status !== "cancelled" && b.paymentStatus !== "paid" && <button className="mini-btn" onClick={() => cancelBooking(b._id)}>Cancel booking</button>}
           </div></div>
-        </article>)}</div>}
-      </section>}
-
-      {panel === "demo-bookings" && <section className="dashboard-section" id="account-panel">
-        <div className="dashboard-title"><div><div className="eyebrow dark"><span></span> SAVED IN THIS BROWSER</div><h2>Demo <em>bookings.</em></h2></div><button className="filter" onClick={() => setPanel("")}>Close</button></div>
-        <p className="message">These are test bookings stored only on this device. Demo payments do not charge money and are not sent to the hotel.</p>
-        {!demoBookings.length ? <p className="empty">No demo bookings yet. Choose a room to try the demo checkout.</p> : <div className="my-bookings-list">{demoBookings.map((booking) => <article className="my-booking-card" key={booking._id}>
-          <div className="my-booking-heading">
-            <div><div className="eyebrow dark"><span></span> DEMO BOOKING</div><h3>{booking.room.name}</h3><small>Reference · {booking._id}</small></div>
-            <span className="status confirmed">confirmed · demo</span>
-          </div>
-          <div className="my-booking-details">
-            <div><small>Guest</small><strong>{booking.guestName}</strong><span>{booking.email}</span></div>
-            <div><small>Check-in</small><strong>{new Date(booking.checkIn).toLocaleDateString("en-IN", { dateStyle: "medium" })}</strong></div>
-            <div><small>Check-out</small><strong>{new Date(booking.checkOut).toLocaleDateString("en-IN", { dateStyle: "medium" })}</strong></div>
-            <div><small>Guests</small><strong>{booking.guests}</strong></div>
-            <div><small>Payment</small><strong>Simulated — no charge</strong></div>
-          </div>
-          <div className="my-booking-footer"><div><small>Demo total</small><strong>{money(booking.totalPrice)}</strong></div></div>
         </article>)}</div>}
       </section>}
 
@@ -377,18 +394,10 @@ export default function App() {
     {selected && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && !submitting) setSelected(null); }}>
       <section className="booking-modal" role="dialog" aria-modal="true" aria-labelledby="booking-title">
         <button className="modal-close" onClick={() => !submitting && setSelected(null)} aria-label="Close">×</button>
-        <div className="eyebrow dark"><span></span> DEMO CHECKOUT · NO REAL CHARGE</div><h2 id="booking-title">{demoPaymentOpen ? <>Demo <em>payment.</em></> : <>Book your <em>room.</em></>}</h2>
+        <div className="eyebrow dark"><span></span> YOUR STAY STARTS HERE</div><h2 id="booking-title">Book your <em>room.</em></h2>
         <div className="modal-room"><img src={selected.image} alt="" /><div><b>{selected.name}</b><small>{selected.type} · up to {selected.capacity} guests</small><strong>{money(selected.pricePerNight)} <small>/ night</small></strong></div></div>
-        {demoPaymentOpen ? <>
-          <p className="auth-hint">This is a simulated payment for demonstration only. No card details are needed and no money will be charged.</p>
-          <div className="total-row"><span>{nights} night{nights === 1 ? "" : "s"} · {form.guests} guest{Number(form.guests) === 1 ? "" : "s"}</span><strong>{money(nights * selected.pricePerNight)}</strong></div>
-          <div className="booking-form-actions">
-            <button className="booking-back-btn" type="button" onClick={() => setDemoPaymentOpen(false)}>← Back</button>
-            <button className="submit-btn" type="button" onClick={completeDemoPayment}>Complete demo payment</button>
-          </div>
-          {bookingError && <p className="booking-error" role="alert">{bookingError}</p>}
-        </> : <form onSubmit={book}>
-          <p className="auth-hint">Try the demo checkout without signing in. This does not create a real reservation or charge.</p>
+        {!user && <p className="auth-hint">Sign in or create an account before confirming your booking.</p>}
+        <form onSubmit={book}>
           <label>Full name<input required value={form.guestName} onChange={(e) => update("guestName", e.target.value)} placeholder="Your name" /></label>
           <label>Email address<input required type="email" value={form.email} onChange={(e) => update("email", e.target.value)} placeholder="you@example.com" /></label>
           <div className="form-row"><label>Check-in<input required type="date" min={today} value={form.checkIn} onChange={(e) => update("checkIn", e.target.value)} /></label><label>Check-out<input required type="date" min={form.checkIn || today} value={form.checkOut} onChange={(e) => update("checkOut", e.target.value)} /></label></div>
@@ -396,10 +405,11 @@ export default function App() {
           {nights > 0 && <div className="total-row"><span>{nights} night{nights > 1 ? "s" : ""} × {money(selected.pricePerNight)}</span><strong>{money(nights * selected.pricePerNight)}</strong></div>}
           <div className="booking-form-actions">
             <button className="booking-back-btn" type="button" disabled={submitting} onClick={() => { setSelected(null); setBookingError(""); }}>← Back</button>
-            <button className="submit-btn" disabled={submitting}>Continue to demo payment <span>↗</span></button>
+            <button className="submit-btn" disabled={submitting}>{submitting ? "Opening secure checkout…" : user ? "Continue to payment" : "Sign in to book"} <span>↗</span></button>
           </div>
           {bookingError && <p className="booking-error" role="alert">{bookingError}</p>}
-        </form>}
+          <small className="form-note">Payments are processed securely by Razorpay.</small>
+        </form>
       </section>
     </div>}
 

@@ -8,10 +8,17 @@ import bookingRoutes from "./routes/bookings.js";
 import authRoutes from "./routes/auth.js";
 import adminRoutes from "./routes/admin.js";
 import Booking from "./models/Booking.js";
+import Room from "./models/Room.js";
+import demoRooms from "./demoRooms.js";
 
 dotenv.config();
 const app = express();
-app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173" }));
+const allowedOrigins = new Set([
+  "https://hotel-room-booking-system-live.vercel.app",
+  "http://localhost:5173",
+  ...(process.env.CLIENT_URL || "").split(",").map((origin) => origin.trim()).filter(Boolean)
+]);
+app.use(cors({ origin: [...allowedOrigins] }));
 
 // Razorpay webhook signature must be computed from the exact raw request bytes.
 app.post("/api/payments/razorpay-webhook", express.raw({ type: "application/json" }), async (req, res) => {
@@ -61,6 +68,16 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/hotel_booking")
-  .then(() => app.listen(PORT, () => console.log(`API listening on http://localhost:${PORT}`)))
-  .catch((err) => { console.error("MongoDB connection failed:", err.message); process.exit(1); });
+async function startServer() {
+  await mongoose.connect(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/hotel_booking");
+  if (await Room.countDocuments() === 0) {
+    await Room.insertMany(demoRooms);
+    console.log(`Seeded ${demoRooms.length} demo rooms.`);
+  }
+  app.listen(PORT, () => console.log(`API listening on port ${PORT}`));
+}
+
+startServer().catch((err) => {
+  console.error("API startup failed:", err.message);
+  process.exit(1);
+});
